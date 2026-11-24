@@ -14,6 +14,8 @@
 // it), and the sentence stays calm enough to paste into a real product
 // error dialog. No apology opens the line: the joke is the report, and
 // the gate below refuses any line that forgets to name its own failure.
+// The line stays in plain printable characters on purpose: a dialog that
+// hides a control character or a look-alike glyph is not honest copy.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -40,6 +42,11 @@ const PADDED_OPENERS = ["Sorry", "Oops", "Error:", "Warning:", "Uh oh"];
 // Words the finished line must carry so the reader knows exactly what
 // broke: the actor that did it, and the state it left the work in.
 const REQUIRED_WORDS = ["Autosave", "blank"];
+
+// The lowest and highest code points a printable line may hold. Anything
+// outside this band is a hidden character smuggled into honest copy.
+const PRINTABLE_LOW = 0x20;
+const PRINTABLE_HIGH = 0x7e;
 
 // Fragments of the one line. Each table holds a single entry on purpose:
 // the program is a writer, not a lottery. A second entry in any table
@@ -175,6 +182,24 @@ function checkNamesFailure(lineText: string): ValidationOutcome {
   return namingOutcome;
 }
 
+function checkVisibleOnly(lineText: string): ValidationOutcome {
+  const visibleOutcome: ValidationOutcome = { passed: true, reason: "" };
+  const glyphs = [...lineText];
+  const hiddenGlyph = glyphs.find((glyph) => {
+    const codePoint = glyph.codePointAt(0) ?? PRINTABLE_LOW;
+    const belowBand = codePoint < PRINTABLE_LOW;
+    const aboveBand = codePoint > PRINTABLE_HIGH;
+    const outsideBand = belowBand || aboveBand;
+    return outsideBand;
+  });
+  const foundHidden = hiddenGlyph !== undefined;
+  if (foundHidden) {
+    visibleOutcome.passed = false;
+    visibleOutcome.reason = `line holds a hidden character: ${hiddenGlyph}`;
+  }
+  return visibleOutcome;
+}
+
 function checkClosing(lineText: string): ValidationOutcome {
   const closingOutcome: ValidationOutcome = { passed: true, reason: "" };
   const endsWithMark = lineText.endsWith(CLOSING_MARK);
@@ -226,6 +251,7 @@ function validateErrorLine(lineText: string): ValidationOutcome {
     checkWhitespace(lineText),
     checkNoPadding(lineText),
     checkNamesFailure(lineText),
+    checkVisibleOnly(lineText),
     checkClosing(lineText),
     checkOneSentence(lineText),
     checkUtf8RoundTrip(lineText),
